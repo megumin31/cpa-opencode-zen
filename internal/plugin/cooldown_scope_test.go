@@ -144,7 +144,9 @@ func TestExecuteCooldownModelScopeSurvivesReload(t *testing.T) {
 				if strings.HasSuffix(req.URL.Path, "/api/v2/config") {
 					return engineFixtureResponse(req, io.NopCloser(strings.NewReader(`{"providers":{"p":{"package":"@opencode/ai/providers/openai/chat","settings":{"baseURL":"`+engineFixtureOrigin+`/inference/v1"},"models":{"a":{"modelID":"limited-model","variants":[{"id":"high","body":{"reasoning_effort":"high"}}]},"alias":{"modelID":"limited-model"},"a(high)":{"modelID":"limited-model","body":{"reasoning_effort":"high"}},"overlay":{"modelID":"other-model","body":{"model":"limited-model"}},"b":{"modelID":"other-model"}}}}}`))), nil
 				}
-				var body struct { Model string `json:"model"` }
+				var body struct {
+					Model string `json:"model"`
+				}
 				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 					t.Error(err)
 				}
@@ -152,40 +154,58 @@ func TestExecuteCooldownModelScopeSurvivesReload(t *testing.T) {
 					limitedCalls.Add(1)
 					return &http.Response{StatusCode: status, Header: http.Header{"Retry-After": {"60"}}, Body: io.NopCloser(strings.NewReader(`{"error":"synthetic limit"}`)), Request: req}, nil
 				}
-				if body.Model != "other-model" { t.Errorf("unexpected wire model %q", body.Model) }
+				if body.Model != "other-model" {
+					t.Errorf("unexpected wire model %q", body.Model)
+				}
 				otherCalls.Add(1)
 				return engineFixtureResponse(req, io.NopCloser(strings.NewReader(nativeFixture("openai")))), nil
 			}}
 			e := New(Dependencies{Now: clock.now, Logf: engineFixtureNoopLog, HTTPClientFactory: func(string) (*http.Client, error) { return &http.Client{Transport: rt}, nil }})
 			t.Cleanup(e.Shutdown)
 			cfg := engineFixtureConfig(t, 0)
-			if err := e.configure(cfg); err != nil { t.Fatal(err) }
+			if err := e.configure(cfg); err != nil {
+				t.Fatal(err)
+			}
 			c := engineFixtureCredential()
 			execute := func(model string, credential credential) error {
-				req := rpcExecutorRequest{ExecutorRequest: pluginapi.ExecutorRequest{Model: "opencode/p/"+model, Format: "openai", SourceFormat: "openai", Payload: []byte(clientRequest("openai")), StorageJSON: rawJSON(t, credential)}}
+				req := rpcExecutorRequest{ExecutorRequest: pluginapi.ExecutorRequest{Model: "opencode/p/" + model, Format: "openai", SourceFormat: "openai", Payload: []byte(clientRequest("openai")), StorageJSON: rawJSON(t, credential)}}
 				_, err := e.execute(rawJSON(t, req), false)
 				return err
 			}
 			engineFixtureStatus(t, execute("a", c), status)
 			key := cooldownKey{credential: c.fingerprint(), model: "limited-model"}
 			deadline := e.cooldowns.entries[key].until
-			clock.advance(30*time.Second)
-			for _, alias := range []string{"a", "alias", "a(high)", "a/variant/high", "overlay"} {
+			clock.advance(30 * time.Second)
+			for _, alias := range []string{"a", "alias", "a%28high%29", "a/variant/high", "overlay"} {
 				engineFixtureStatus(t, execute(alias, c), status)
 			}
-			if limitedCalls.Load() != 1 { t.Fatal("alias or variant bypassed the cooldown") }
-			if err := execute("b", c); err != nil || otherCalls.Load() != 1 { t.Fatalf("other model blocked: %v", err) }
-			if err := e.configure(cfg); err != nil { t.Fatal(err) }
+			if limitedCalls.Load() != 1 {
+				t.Fatal("alias or variant bypassed the cooldown")
+			}
+			if err := execute("b", c); err != nil || otherCalls.Load() != 1 {
+				t.Fatalf("other model blocked: %v", err)
+			}
+			if err := e.configure(cfg); err != nil {
+				t.Fatal(err)
+			}
 			engineFixtureStatus(t, execute("alias", c), status)
-			if limitedCalls.Load() != 1 || !e.cooldowns.entries[key].until.Equal(deadline) { t.Fatal("reload reset or extended restriction") }
-			if err := execute("b", c); err != nil || otherCalls.Load() != 2 { t.Fatalf("reload restricted unrelated model: %v", err) }
+			if limitedCalls.Load() != 1 || !e.cooldowns.entries[key].until.Equal(deadline) {
+				t.Fatal("reload reset or extended restriction")
+			}
+			if err := execute("b", c); err != nil || otherCalls.Load() != 2 {
+				t.Fatalf("reload restricted unrelated model: %v", err)
+			}
 			other := c
 			other.Key += "-other"
 			engineFixtureStatus(t, execute("a", other), status)
-			if limitedCalls.Load() != 2 { t.Fatal("explicit distinct credential inherited another credential's restriction") }
-			clock.advance(30*time.Second)
+			if limitedCalls.Load() != 2 {
+				t.Fatal("explicit distinct credential inherited another credential's restriction")
+			}
+			clock.advance(30 * time.Second)
 			engineFixtureStatus(t, execute("a", c), status)
-			if limitedCalls.Load() != 3 { t.Fatal("reload or local retry extended original deadline") }
+			if limitedCalls.Load() != 3 {
+				t.Fatal("reload or local retry extended original deadline")
+			}
 		})
 	}
 }

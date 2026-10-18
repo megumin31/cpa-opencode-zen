@@ -95,13 +95,6 @@ func (e *Engine) execute(raw []byte, stream bool) (any, error) {
 	if !protocol.ConversionSupported(up, output, stream) {
 		return nil, fail(400, "requested response protocol conversion is unavailable")
 	}
-	cooldownKey, err := requestCooldownKey(c, r, payload)
-	if err != nil {
-		return nil, err
-	}
-	if err := e.cooldowns.check(cooldownKey); err != nil {
-		return nil, err
-	}
 	// Test-only restriction inspects the exact serialized payload and endpoint
 	// after every native/config overlay. It never rewrites protocol semantics.
 	guardConfig := g.config
@@ -112,12 +105,19 @@ func (e *Engine) execute(raw []byte, stream bool) (any, error) {
 	if err := e.checkInferenceGuard(guardConfig, r.Protocol, target, payload); err != nil {
 		return nil, err
 	}
+	cooldownScope, err := requestCooldownKey(c, r, payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.cooldowns.check(cooldownScope); err != nil {
+		return nil, err
+	}
 	resp, err := outbound(g, ctx, c, proxy, "POST", target, headers, payload, true)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		e.cooldowns.rememberHeaders(cooldownKey, resp.StatusCode, resp.Header)
+		e.cooldowns.rememberHeaders(cooldownScope, resp.StatusCode, resp.Header)
 		diagnostic := diagnostics.CaptureHTTP(ctx, resp, append(diagnosticSecrets(c, headers, target, proxy, g.config.ProxyURL), g.config.WorkerToken))
 		diagnostics.Log("upstream", diagnostic, e.logf)
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
