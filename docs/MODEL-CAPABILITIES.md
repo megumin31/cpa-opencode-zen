@@ -69,7 +69,9 @@ Consequently, a client using only OpenAI model discovery cannot discover all
 registered capability fields from this plugin alone. This patch does not modify
 CPA or promise that a client will automatically show a reasoning selector.
 `cmd/hostcheck/model_metadata_test.go` checks the real host registry and list
-projection, including these omissions. The v8.0.30 registry and plugin adapter
+projection, including these omissions. The existing native host harness also
+checks reasoning levels, token limits and modalities from fake Console discovery
+through the loaded plugin C ABI and the real host adapter. The v8.0.30 registry and plugin adapter
 sources are byte-identical to v8.0.29 for this behavior.
 
 References: [SDK schema](https://github.com/router-for-me/CLIProxyAPI/blob/v8.0.29/sdk/pluginapi/types.go#L147-L201),

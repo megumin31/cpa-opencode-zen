@@ -117,7 +117,7 @@ func (m *mockUpstream) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"providers":{"p":{"package":"@opencode/ai/providers/openai/chat","settings":{"baseURL":%q},"models":{"m":{"compatibility":{"supportsStore":false}}}}}}`, m.server.URL+"/inference")
+		fmt.Fprintf(w, `{"providers":{"p":{"package":"@opencode/ai/providers/openai/chat","settings":{"baseURL":%q},"models":{"m":{"compatibility":{"supportsStore":false},"reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high","xhigh","max"]}],"limit":{"context":1048576,"input":524288,"output":131072},"capabilities":{"input":["text","image","video"],"output":["text"]}}}}}}`, m.server.URL+"/inference")
 	case "/inference/chat/completions":
 		m.inferenceCalls.Add(1)
 		if r.Method != http.MethodPost {
@@ -290,6 +290,16 @@ func run() error {
 	if result.Err != nil || !result.Handled || len(result.Models) != 1 || result.Models[0].ID != modelID {
 		return fmt.Errorf("model discovery failed: handled=%v models=%d err=%v", result.Handled, len(result.Models), result.Err)
 	}
+	// Validate metadata through the actual C ABI and host adapter, rather than
+	// only constructing a registry model inside a unit test.
+	metadata := result.Models[0]
+	if metadata.ContextLength != 1048576 || metadata.InputTokenLimit != 524288 || metadata.OutputTokenLimit != 131072 || metadata.MaxCompletionTokens != 131072 ||
+		strings.Join(metadata.SupportedInputModalities, ",") != "text,image,video" || strings.Join(metadata.SupportedOutputModalities, ",") != "text" ||
+		metadata.Thinking == nil || strings.Join(metadata.Thinking.Levels, ",") != "low,medium,high,xhigh,max" ||
+		metadata.Thinking.Min != 0 || metadata.Thinking.Max != 0 || metadata.Thinking.ZeroAllowed || metadata.Thinking.DynamicAllowed {
+		return fmt.Errorf("model capability metadata lost or invented across C ABI: %+v", metadata)
+	}
+	fmt.Println("PASS: catalog reasoning levels, exact token limits and modality declarations survive C ABI model discovery")
 	_, handled, err = host.StartLogin(ctx, pluginID, "", nil)
 	if !handled || err == nil || !strings.Contains(err.Error(), "OAuth") {
 		return fmt.Errorf("OAuth login should explicitly return unsupported, got handled=%v err=%v", handled, err)
