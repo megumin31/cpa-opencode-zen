@@ -98,7 +98,7 @@ func New(deps Dependencies) *Engine {
 	}
 	e := &Engine{now: deps.Now, logf: deps.Logf, clientFactory: deps.HTTPClientFactory, streams: deps.Streams}
 	e.sessions = newSessionManager(func() time.Time { return e.now() }, deps.Random)
-	e.cooldowns = cooldownStore{entries: make(map[string]cooldown), now: func() time.Time { return e.now() }}
+	e.cooldowns = cooldownStore{entries: make(map[cooldownKey]cooldown), now: func() time.Time { return e.now() }}
 	return e
 }
 

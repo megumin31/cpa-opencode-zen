@@ -18,7 +18,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-// Unique fake credentials isolate tests from credential-scoped Retry-After state
+// Unique fake credentials isolate tests from credential-and-model-scoped Retry-After state
 // even when the OS reuses an earlier httptest server's ephemeral port.
 func guardTestCredential(t *testing.T, server string) credential {
 	c := testCredential(server)

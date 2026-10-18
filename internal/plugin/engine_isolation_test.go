@@ -149,17 +149,17 @@ func TestEngineInstancesIsolateClockLogsHTTPAndMutableCaches(t *testing.T) {
 	if firstRandom[len(firstRandom)-14:] == secondRandom[len(secondRandom)-14:] {
 		t.Fatal("independent random readers were ignored")
 	}
-	first.cooldowns.rememberAfter(c, 429, "10")
-	engineFixtureStatus(t, first.cooldowns.check(c), 429)
-	if err := second.cooldowns.check(c); err != nil {
+	first.cooldowns.rememberAfter(cooldownKey{credential: c.fingerprint(), model: "m"}, 429, "10")
+	engineFixtureStatus(t, first.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}), 429)
+	if err := second.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}); err != nil {
 		t.Fatal("cooldown leaked to second engine", err)
 	}
-	second.cooldowns.rememberAfter(c, 503, "10")
+	second.cooldowns.rememberAfter(cooldownKey{credential: c.fingerprint(), model: "m"}, 503, "10")
 	firstClock.advance(11 * time.Second)
-	if err := first.cooldowns.check(c); err != nil {
+	if err := first.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}); err != nil {
 		t.Fatal("first clock advance did not expire its cooldown", err)
 	}
-	engineFixtureStatus(t, second.cooldowns.check(c), 503)
+	engineFixtureStatus(t, second.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}), 503)
 	// Reconfiguration and shutdown of one instance cannot cancel the other root
 	// or close its injected transport, even for identical endpoint and proxy keys.
 	secondRoot := secondGeneration.root
@@ -214,7 +214,7 @@ func TestEngineReconfigurePreservesAffinityAndCooldownButReplacesGenerationState
 		t.Fatal(err)
 	}
 	sessions := e.sessions
-	e.cooldowns.rememberAfter(c, 429, "60")
+	e.cooldowns.rememberAfter(cooldownKey{credential: c.fingerprint(), model: "m"}, 429, "60")
 	old, routes := engineFixtureDiscover(t, e, c)
 	if routes["opencode/p/m"].ModelID != "generation-model-1" {
 		t.Fatal("initial route missing")
@@ -279,13 +279,13 @@ func TestEngineReconfigurePreservesAffinityAndCooldownButReplacesGenerationState
 	if e.sessions != sessions || firstSession.Get("X-Session-Id") != secondSession.Get("X-Session-Id") {
 		t.Fatal("ordinary reconfiguration reset established session affinity")
 	}
-	engineFixtureStatus(t, e.cooldowns.check(c), 429)
+	engineFixtureStatus(t, e.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}), 429)
 	_, freshRoutes := engineFixtureDiscover(t, e, c)
 	if freshRoutes["opencode/p/m"].ModelID != "generation-model-2" || consoleCalls.Load() != 2 {
 		t.Fatal("fresh generation served stale route cache")
 	}
 	clock.advance(61 * time.Second)
-	if err := e.cooldowns.check(c); err != nil {
+	if err := e.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}); err != nil {
 		t.Fatal("retained cooldown no longer follows injected clock", err)
 	}
 }

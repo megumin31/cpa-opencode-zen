@@ -95,7 +95,11 @@ func (e *Engine) execute(raw []byte, stream bool) (any, error) {
 	if !protocol.ConversionSupported(up, output, stream) {
 		return nil, fail(400, "requested response protocol conversion is unavailable")
 	}
-	if err := e.cooldowns.check(c); err != nil {
+	cooldownKey, err := requestCooldownKey(c, r, payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.cooldowns.check(cooldownKey); err != nil {
 		return nil, err
 	}
 	// Test-only restriction inspects the exact serialized payload and endpoint
@@ -113,7 +117,7 @@ func (e *Engine) execute(raw []byte, stream bool) (any, error) {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		e.cooldowns.rememberHeaders(c, resp.StatusCode, resp.Header)
+		e.cooldowns.rememberHeaders(cooldownKey, resp.StatusCode, resp.Header)
 		diagnostic := diagnostics.CaptureHTTP(ctx, resp, append(diagnosticSecrets(c, headers, target, proxy, g.config.ProxyURL), g.config.WorkerToken))
 		diagnostics.Log("upstream", diagnostic, e.logf)
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {

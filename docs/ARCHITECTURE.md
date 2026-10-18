@@ -79,7 +79,7 @@ so new worker increments cannot race a zero-count shutdown wait.
 
 Route discovery, host-proxy association, request cancellation, HTTP connections,
 and active stream IDs belong to a configuration generation. Session affinity
-and credential-scoped Retry-After gates belong to the Engine lifetime, so a
+and credential-and-upstream-model Retry-After gates belong to the Engine lifetime, so a
 configuration update neither resets a live conversation nor erases an upstream
 cooldown. Session retention is bounded by a 10,000-entry LRU; eviction can change
 an evicted scope's later ID. Terminal shutdown clears these stores. Quiescence

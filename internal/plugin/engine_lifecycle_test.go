@@ -335,7 +335,7 @@ func TestEngineInvalidConfigurationPreservesActiveGeneration(t *testing.T) {
 func TestEngineShutdownIsConcurrentIdempotentAndTerminal(t *testing.T) {
 	t.Parallel()
 	e, old, host, body, rt := engineFixtureStartBlockedStream(t)
-	e.cooldowns.rememberAfter(engineFixtureCredential(), 429, "60")
+	e.cooldowns.rememberAfter(cooldownKey{credential: engineFixtureCredential().fingerprint(), model: "m"}, 429, "60")
 	const count = 12
 	complete := make(chan struct{}, count)
 	for i := 0; i < count; i++ {
@@ -417,9 +417,9 @@ func TestEngineQuiesceCanResumeOnlyWithFreshGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.cooldowns.rememberAfter(c, 429, "60")
+	e.cooldowns.rememberAfter(cooldownKey{credential: c.fingerprint(), model: "m"}, 429, "60")
 	e.quiesce(false)
-	engineFixtureStatus(t, e.cooldowns.check(c), 429)
+	engineFixtureStatus(t, e.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}), 429)
 	if old.root.Err() != context.Canceled {
 		t.Fatal("quiesce did not cancel prior root")
 	}
@@ -442,7 +442,7 @@ func TestEngineQuiesceCanResumeOnlyWithFreshGeneration(t *testing.T) {
 	if first.Get("X-Session-Id") != second.Get("X-Session-Id") {
 		t.Fatal("quiesce reset stable session affinity")
 	}
-	engineFixtureStatus(t, e.cooldowns.check(c), 429)
+	engineFixtureStatus(t, e.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}), 429)
 }
 
 // Exercise the admission/Add versus retirement/Wait boundary while successive

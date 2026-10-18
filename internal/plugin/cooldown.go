@@ -1,21 +1,54 @@
 package plugin
 
 import (
+	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/megumin31/cpa-opencode-zen/internal/catalog"
 )
 
 // The ABI cannot attach headers to an RPC error. Keep upstream Retry-After as a
-// credential-scoped local gate so host retries cannot resend early. No sleeps,
+// credential-and-upstream-model gate so host retries cannot resend early.
+// Neither 429 nor 503 alone establishes an account-wide restriction. No sleeps,
 // credential rotation, or inference retries are performed by this plugin.
 type cooldownStore struct {
 	sync.Mutex
-	entries map[string]cooldown
+	entries map[cooldownKey]cooldown
 	now     func() time.Time
+}
+
+// Keep the two dimensions separate; aliases and request-local reasoning options
+// never become part of a cooldown identity.
+type cooldownKey struct {
+	credential string
+	model      string
+}
+
+// requestCooldownKey uses the final wire model, after all configured overlays.
+// The resolver has already removed public aliases and variant labels. Gemini's
+// model is carried in the URL, not a body overlay; its optional models/ prefix
+// is removed by Prepare. Preserve actual model spelling rather than guessing
+// that case differences or suffixes in real upstream IDs are interchangeable.
+func requestCooldownKey(c credential, r catalog.Route, payload []byte) (cooldownKey, error) {
+	model := strings.TrimPrefix(r.ModelID, "models/")
+	if r.Protocol != "gemini" {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(payload, &body); err != nil || body.Model == "" {
+			return cooldownKey{}, fail(400, "upstream request must name a model")
+		}
+		model = body.Model
+	}
+	if model == "" {
+		return cooldownKey{}, fail(400, "upstream request must name a model")
+	}
+	return cooldownKey{credential: c.fingerprint(), model: model}, nil
 }
 
 type cooldown struct {
@@ -25,7 +58,7 @@ type cooldown struct {
 
 // Native na prefers retry-after-ms over Retry-After. Keep the existing local
 // 429/503 gate; the host ABI still cannot convey original retry response headers.
-func (s *cooldownStore) rememberHeaders(c credential, status int, headers http.Header) {
+func (s *cooldownStore) rememberHeaders(key cooldownKey, status int, headers http.Header) {
 	if status != 429 && status != 503 {
 		return
 	}
@@ -36,14 +69,14 @@ func (s *cooldownStore) rememberHeaders(c credential, status int, headers http.H
 			if ms < max-1 {
 				delay = time.Duration(ms * float64(time.Millisecond))
 			}
-			s.remember(c, status, s.now().Add(delay))
+			s.remember(key, status, s.now().Add(delay))
 			return
 		}
 	}
-	s.rememberAfter(c, status, headers.Get("Retry-After"))
+	s.rememberAfter(key, status, headers.Get("Retry-After"))
 }
 
-func (s *cooldownStore) rememberAfter(c credential, status int, value string) {
+func (s *cooldownStore) rememberAfter(key cooldownKey, status int, value string) {
 	if status != 429 && status != 503 {
 		return
 	}
@@ -61,10 +94,10 @@ func (s *cooldownStore) rememberAfter(c credential, status int, value string) {
 	} else {
 		return
 	}
-	s.remember(c, status, until)
+	s.remember(key, status, until)
 }
 
-func (s *cooldownStore) remember(c credential, status int, until time.Time) {
+func (s *cooldownStore) remember(key cooldownKey, status int, until time.Time) {
 	current := s.now()
 	if !until.After(current) {
 		return
@@ -76,15 +109,13 @@ func (s *cooldownStore) remember(c credential, status int, until time.Time) {
 			delete(s.entries, key)
 		}
 	}
-	key := c.fingerprint()
 	if previous := s.entries[key]; previous.until.Before(until) {
 		s.entries[key] = cooldown{until, status}
 	}
 }
-func (s *cooldownStore) check(c credential) error {
+func (s *cooldownStore) check(key cooldownKey) error {
 	s.Lock()
 	defer s.Unlock()
-	key := c.fingerprint()
 	item, ok := s.entries[key]
 	if !ok {
 		return nil
@@ -93,5 +124,5 @@ func (s *cooldownStore) check(c credential) error {
 		delete(s.entries, key)
 		return nil
 	}
-	return fail(item.status, "OpenCode retry-after interval is still active")
+	return fail(item.status, "OpenCode retry-after interval is still active for this model")
 }
