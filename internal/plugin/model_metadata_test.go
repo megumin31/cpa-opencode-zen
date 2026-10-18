@@ -167,3 +167,44 @@ func TestCatalogNativeToggleBudgetAndConfiguredPrecedence(t *testing.T) {
         if _,err := engine.prepareSemanticFixture(t,"claude","openai",raw,nil); err == nil { t.Fatal("lossy budget/toggle conversion invented an effort") }
     }
 }
+
+// Capture the complete executor's outbound HTTP request, not just the prepared
+// map. All traffic is intercepted by a fake RoundTripper; no service is called.
+func TestCatalogEffortSelectionReachesOutboundRequest(t *testing.T) {
+    engine := newTestEngine(t)
+    engine.current.config = defaultConfig()
+    snapshot := string(modelMetadataFixture(t))
+    inference, discovery := 0,0
+    wantLevel := ""
+    engine.clientFactory = func(string) (*http.Client,error) {
+        return &http.Client{Transport:discoveryRoundTripFunc(func(r *http.Request) (*http.Response,error) {
+            response := snapshot
+            if r.URL.String() == "https://models.opencode.ai/api.json" {
+                discovery++
+                if r.Header.Get("Authorization") != "" { t.Error("catalog received credentials") }
+            } else {
+                inference++
+                if r.Method != "POST" || r.URL.String() != "https://opencode.ai/inference/openai/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer public" { t.Fatalf("unexpected inference target: %s %v",r.Method,r.URL) }
+                var body map[string]any
+                if err := json.NewDecoder(r.Body).Decode(&body); err != nil { t.Fatal(err) }
+                if body["reasoning_effort"] != wantLevel || body["model"] != "anonymous-preview" { t.Fatalf("outbound lost declared effort: %#v",body) }
+                response = nativeFixture("openai")
+            }
+            return &http.Response{StatusCode:200,Header:make(http.Header),Body:io.NopCloser(strings.NewReader(response)),Request:r},nil
+        })},nil
+    }
+    c := credential{Type:providerID,Key:"public",Server:"https://opencode.ai/console"}
+    for _, level := range []string{"xhigh","max"} {
+        wantLevel = level
+        for _, source := range []string{"openai","openai-response"} {
+            payload := `{"messages":[{"role":"user","content":"synthetic"}],"reasoning_effort":"`+level+`"}`
+            if source == "openai-response" { payload = `{"input":"synthetic","reasoning":{"effort":"`+level+`"}}` }
+            req := rpcExecutorRequest{ExecutorRequest:pluginapi.ExecutorRequest{Model:"opencode-zen/anonymous-preview",Format:source,SourceFormat:source,Payload:[]byte(payload),StorageJSON:rawJSON(t,c)}}
+            if _,err := engine.execute(rawJSON(t,req),false); err != nil { t.Fatal(source,level,err) }
+        }
+    }
+    if inference != 4 || discovery != 1 { t.Fatalf("unexpected request counts: inference=%d discovery=%d",inference,discovery) }
+    // A registered capability does not silently create suffix aliases.
+    req := rpcExecutorRequest{ExecutorRequest:pluginapi.ExecutorRequest{Model:"opencode-zen/anonymous-preview(max)",Format:"openai",SourceFormat:"openai",Payload:[]byte(clientRequest("openai")),StorageJSON:rawJSON(t,c)}}
+    if _,err := engine.execute(rawJSON(t,req),false); err == nil || inference != 4 { t.Fatal("unconfigured suffix executed an inference",err,inference) }
+}

@@ -92,7 +92,9 @@ budget declaration.
 
 Offline tests verify every declared anonymous-model effort (`low`, `medium`,
 `high`, `xhigh`, `max`) reaches the final Chat/Responses payload, including both
-cross-conversion directions. Native toggle and numeric budget tests verify the
+cross-conversion directions. A full-executor fake HTTP capture also checks that
+`xhigh` / `max` reach the actual outbound request and that unconfigured suffix
+aliases do not execute. Native toggle and numeric budget tests verify the
 actual fields. Numeric budgets are never approximated as effort tiers; lossy
 cross-protocol controls fail with 400 rather than silently changing the request.
 
