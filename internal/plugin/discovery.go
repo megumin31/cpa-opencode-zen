@@ -318,6 +318,11 @@ func thinkingInfo(capabilities map[string]any) *pluginapi.ThinkingSupport {
 			// bound from output limits or equate a budget with named levels.
 			info.Min = int(integer(option["min"]))
 			info.Max = int(integer(option["max"]))
+			if info.Min > 0 && info.Max > 0 && info.Min > info.Max {
+				// An impossible range has no faithful SDK representation. Keep
+				// the raw declaration without inventing a repaired bound.
+				info.Min, info.Max = 0, 0
+			}
 		}
 	}
 	return info

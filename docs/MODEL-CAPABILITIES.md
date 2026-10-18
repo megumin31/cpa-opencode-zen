@@ -50,7 +50,8 @@ not invent effort levels, disable support, automatic budget selection or bounds.
 retained internally but do not fabricate SDK controls. The SDK cannot distinguish
 an absent numeric bound from zero or separately express a budget option with no
 bounds. Complete option declarations remain in the resolved catalog; no imaginary
-SDK fields or misleading effort substitutes are added.
+SDK fields or misleading effort substitutes are added. An inverted two-sided
+budget range is retained in the raw declaration but omitted from SDK bounds.
 
 ## What clients can actually see
 

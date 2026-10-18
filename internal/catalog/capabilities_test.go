@@ -52,10 +52,11 @@ func TestCapabilityOverridePrecedenceAndExplicitClear(t *testing.T) {
     if _, stale := budget["min"]; stale { t.Fatal("options were recursively merged instead of replaced") }
     v := routes["opencode-zen/alias/variant/explicit"]
     if v.Settings["reasoningEffort"] != "max" || !reflect.DeepEqual(v.Capabilities, r.Capabilities) { t.Fatal(v) }
-    // Resolving again must not retain any mutations from a previously returned route.
+    // Distinct aliases in the same result must not share nested metadata.
     r.Capabilities["reasoning_options"].([]any)[0].(map[string]any)["values"] = []any{"mutated"}
-    fresh, err := ResolvePublicRoutes(capabilityFixture(t))
-    if err != nil || reflect.DeepEqual(fresh["opencode-zen/anonymous-preview"].Capabilities["reasoning_options"],r.Capabilities["reasoning_options"]) { t.Fatalf("mutable metadata leaked: %v",err) }
+    original := routes["opencode-zen/anonymous-preview"].Capabilities["reasoning_options"].([]any)[0].(map[string]any)["values"]
+    if !reflect.DeepEqual(original,[]any{"low","medium","high","xhigh","max"}) { t.Fatalf("alias mutated the source model: %#v",original) }
+
 }
 
 func TestNativeCapabilityMetadataPrecedesPublicSchema(t *testing.T) {

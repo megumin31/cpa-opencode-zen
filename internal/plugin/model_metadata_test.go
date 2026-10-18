@@ -77,6 +77,13 @@ func TestThinkingOptionsDoNotInventUnknownModes(t *testing.T) {
     if got := thinkingInfo(caps); !reflect.DeepEqual(got,want) { t.Fatalf("%#v",got) }
 }
 
+func TestThinkingInfoDoesNotPublishInvertedBudgetRange(t *testing.T) {
+    option := map[string]any{"type":"budget_tokens","min":float64(8192),"max":float64(1024)}
+    caps := map[string]any{"reasoning":true,"reasoning_options":[]any{option}}
+    if got := thinkingInfo(caps); !reflect.DeepEqual(got,&pluginapi.ThinkingSupport{}) { t.Fatalf("impossible range published: %#v",got) }
+    if option["min"] != float64(8192) || option["max"] != float64(1024) { t.Fatal("invalid declaration was rewritten") }
+}
+
 func TestCapabilityMetadataRefreshAndErrorRetention(t *testing.T) {
     engine := newTestEngine(t)
     engine.current.config = defaultConfig()
