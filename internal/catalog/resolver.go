@@ -46,20 +46,20 @@ type Variant struct {
 
 // Model is the normalized, JSON-backed catalog model metadata.
 type Model struct {
-	ID            string            `json:"id"`
-	ModelID       string            `json:"modelID"`
-	Package       string            `json:"package"`
-	Settings      map[string]any    `json:"settings"`
-	Headers       map[string]string `json:"headers"`
-	Body          map[string]any    `json:"body"`
-	Compatibility map[string]any    `json:"compatibility"`
-	Capabilities  map[string]any    `json:"capabilities"`
-	Reasoning     *bool             `json:"reasoning"`
-	ReasoningOptions []any          `json:"reasoning_options"`
-	Limit         map[string]any    `json:"limit"`
-	Variants      []Variant         `json:"variants"`
-	Disabled      bool              `json:"disabled"`
-	Status        string            `json:"status"`
+	ID               string            `json:"id"`
+	ModelID          string            `json:"modelID"`
+	Package          string            `json:"package"`
+	Settings         map[string]any    `json:"settings"`
+	Headers          map[string]string `json:"headers"`
+	Body             map[string]any    `json:"body"`
+	Compatibility    map[string]any    `json:"compatibility"`
+	Capabilities     map[string]any    `json:"capabilities"`
+	Reasoning        *bool             `json:"reasoning"`
+	ReasoningOptions []any             `json:"reasoning_options"`
+	Limit            map[string]any    `json:"limit"`
+	Variants         []Variant         `json:"variants"`
+	Disabled         bool              `json:"disabled"`
+	Status           string            `json:"status"`
 }
 
 // Provider is a normalized catalog provider and its model definitions.

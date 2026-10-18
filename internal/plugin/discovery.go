@@ -261,12 +261,18 @@ func integer(v any) int64 {
 			return int64(v)
 		}
 	case int:
-		if v > 0 { return int64(v) }
+		if v > 0 {
+			return int64(v)
+		}
 	case int64:
-		if v > 0 { return v }
+		if v > 0 {
+			return v
+		}
 	case json.Number:
 		i, err := v.Int64()
-		if err == nil && i > 0 { return i }
+		if err == nil && i > 0 {
+			return i
+		}
 	}
 	return 0
 }
@@ -296,10 +302,14 @@ func thinkingInfo(capabilities map[string]any) *pluginapi.ThinkingSupport {
 	options, _ := capabilities["reasoning_options"].([]any)
 	for _, value := range options {
 		option, ok := value.(map[string]any)
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		switch option["type"] {
 		case "effort", "toggle", "budget_tokens":
-			if info == nil { info = &pluginapi.ThinkingSupport{} }
+			if info == nil {
+				info = &pluginapi.ThinkingSupport{}
+			}
 		default:
 			continue
 		}
@@ -307,9 +317,18 @@ func thinkingInfo(capabilities map[string]any) *pluginapi.ThinkingSupport {
 		case "effort":
 			for _, level := range metadataStrings(option["values"]) {
 				found := false
-				for _, previous := range info.Levels { if previous == level { found = true; break } }
-				if !found { info.Levels = append(info.Levels, level) }
-				if level == "none" { info.ZeroAllowed = true }
+				for _, previous := range info.Levels {
+					if previous == level {
+						found = true
+						break
+					}
+				}
+				if !found {
+					info.Levels = append(info.Levels, level)
+				}
+				if level == "none" {
+					info.ZeroAllowed = true
+				}
 			}
 		case "toggle":
 			info.ZeroAllowed = true
