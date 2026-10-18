@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -242,9 +243,11 @@ func modelInfos(cfg pluginConfig, routes map[string]catalog.Route) []pluginapi.M
 		m.InputTokenLimit = integer(r.Limit["input"])
 		m.OutputTokenLimit = integer(r.Limit["output"])
 		m.MaxCompletionTokens = m.OutputTokenLimit
-		if v, ok := r.Capabilities["reasoning"].(bool); ok && v {
-			m.Thinking = &pluginapi.ThinkingSupport{DynamicAllowed: true, ZeroAllowed: true}
-		}
+		// These are catalog model declarations, not a promise that every host
+		// input protocol can represent every modality or reasoning control.
+		m.SupportedInputModalities = metadataStrings(r.Capabilities["input"])
+		m.SupportedOutputModalities = metadataStrings(r.Capabilities["output"])
+		m.Thinking = thinkingInfo(r.Capabilities)
 		out = append(out, m)
 	}
 	return out
@@ -252,14 +255,70 @@ func modelInfos(cfg pluginConfig, routes map[string]catalog.Route) []pluginapi.M
 func integer(v any) int64 {
 	switch v := v.(type) {
 	case float64:
-		return int64(v)
+		// Token counts are positive integral declarations. Do not truncate a
+		// malformed fraction, overflow, or infer a missing value from context.
+		if v > 0 && v < math.Exp2(63) && math.Trunc(v) == v {
+			return int64(v)
+		}
 	case int:
-		return int64(v)
+		if v > 0 { return int64(v) }
 	case int64:
-		return v
+		if v > 0 { return v }
 	case json.Number:
-		i, _ := v.Int64()
-		return i
+		i, err := v.Int64()
+		if err == nil && i > 0 { return i }
 	}
 	return 0
+}
+
+func metadataStrings(value any) []string {
+	values, _ := value.([]any)
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range values {
+		text, ok := v.(string)
+		if ok && text != "" && !seen[text] {
+			out = append(out, text)
+			seen[text] = true
+		}
+	}
+	return out
+}
+
+func thinkingInfo(capabilities map[string]any) *pluginapi.ThinkingSupport {
+	if supported, declared := capabilities["reasoning"].(bool); declared && !supported {
+		return nil
+	}
+	var info *pluginapi.ThinkingSupport
+	if capabilities["reasoning"] == true {
+		info = &pluginapi.ThinkingSupport{}
+	}
+	options, _ := capabilities["reasoning_options"].([]any)
+	for _, value := range options {
+		option, ok := value.(map[string]any)
+		if !ok { continue }
+		switch option["type"] {
+		case "effort", "toggle", "budget_tokens":
+			if info == nil { info = &pluginapi.ThinkingSupport{} }
+		default:
+			continue
+		}
+		switch option["type"] {
+		case "effort":
+			for _, level := range metadataStrings(option["values"]) {
+				found := false
+				for _, previous := range info.Levels { if previous == level { found = true; break } }
+				if !found { info.Levels = append(info.Levels, level) }
+				if level == "none" { info.ZeroAllowed = true }
+			}
+		case "toggle":
+			info.ZeroAllowed = true
+		case "budget_tokens":
+			// Zero means unspecified in this SDK. Never fabricate the missing
+			// bound from output limits or equate a budget with named levels.
+			info.Min = int(integer(option["min"]))
+			info.Max = int(integer(option["max"]))
+		}
+	}
+	return info
 }

@@ -54,6 +54,8 @@ type Model struct {
 	Body          map[string]any    `json:"body"`
 	Compatibility map[string]any    `json:"compatibility"`
 	Capabilities  map[string]any    `json:"capabilities"`
+	Reasoning     *bool             `json:"reasoning"`
+	ReasoningOptions []any          `json:"reasoning_options"`
 	Limit         map[string]any    `json:"limit"`
 	Variants      []Variant         `json:"variants"`
 	Disabled      bool              `json:"disabled"`
@@ -249,6 +251,7 @@ func resolverCatalogModel(raw []byte, key string, provider Provider, providerNPM
 	if wire.Modalities.Output != nil {
 		caps["output"] = resolverStrings(wire.Modalities.Output)
 	}
+	caps = resolverReasoning(caps, m)
 	m.Capabilities = resolverCapabilities(caps, m.Capabilities)
 	if field, ok := wire.Interleaved.(string); ok {
 		m.Compatibility = resolverShallow(map[string]any{"reasoningField": field}, m.Compatibility)
@@ -395,7 +398,9 @@ func ResolveRoutes(configJSON, catalogJSON []byte) (map[string]Route, error) {
 			m.Headers = Headers(m.Headers, mo.Headers)
 			m.Body = Merge(m.Body, mo.Body)
 			m.Compatibility = resolverShallow(m.Compatibility, mo.Compatibility)
-			m.Capabilities = resolverCapabilities(m.Capabilities, mo.Capabilities)
+			// Public-schema metadata is accepted alongside the normalized native
+			// capabilities object. Explicit native fields have the final say.
+			m.Capabilities = resolverCapabilities(resolverReasoning(m.Capabilities, mo), mo.Capabilities)
 			m.Limit = resolverShallow(m.Limit, mo.Limit)
 			m.Variants, err = resolverVariants(m.Variants, mo.Variants)
 			if err != nil {
@@ -735,11 +740,25 @@ func Headers(left, right map[string]string) map[string]string {
 func resolverCapabilities(base, override map[string]any) map[string]any {
 	result := map[string]any{"tools": false, "input": []any{}, "output": []any{}}
 	for _, source := range []map[string]any{base, override} {
-		for _, k := range []string{"tools", "input", "output"} {
+		for _, k := range []string{"tools", "input", "output", "reasoning", "reasoning_options"} {
 			if v, ok := source[k]; ok && v != nil {
 				result[k] = Clone(v)
 			}
 		}
+	}
+	return result
+}
+
+// Reasoning options are declarations, not provider request recipes. Keep their
+// type and exact values (including unknown future option types) without creating
+// variants, guessing budgets, or conflating a toggle with an effort tier.
+func resolverReasoning(base map[string]any, m Model) map[string]any {
+	result := resolverShallow(nil, base)
+	if m.Reasoning != nil {
+		result["reasoning"] = *m.Reasoning
+	}
+	if m.ReasoningOptions != nil {
+		result["reasoning_options"] = Clone(m.ReasoningOptions)
 	}
 	return result
 }
@@ -749,6 +768,13 @@ func resolverCloneModel(m Model) Model {
 	m.Body = Merge(nil, m.Body)
 	m.Compatibility = resolverShallow(nil, m.Compatibility)
 	m.Capabilities = resolverShallow(nil, m.Capabilities)
+	if m.Reasoning != nil {
+		value := *m.Reasoning
+		m.Reasoning = &value
+	}
+	if m.ReasoningOptions != nil {
+		m.ReasoningOptions = Clone(m.ReasoningOptions).([]any)
+	}
 	m.Limit = resolverShallow(nil, m.Limit)
 	m.Variants = append([]Variant(nil), m.Variants...)
 	return m

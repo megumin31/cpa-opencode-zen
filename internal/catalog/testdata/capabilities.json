@@ -1,0 +1,46 @@
+{
+  "opencode": {
+    "npm": "@ai-sdk/openai-compatible",
+    "api": "https://opencode.ai/inference/openai/v1",
+    "models": {
+      "anonymous-preview": {
+        "reasoning": true,
+        "reasoning_options": [{"type":"effort","values":["low","medium","high","xhigh","max"]}],
+        "tool_call": true,
+        "modalities": {"input":["text","image","video"],"output":["text"]},
+        "limit": {"context":1048576,"input":524288,"output":131072},
+        "cost": {"input":0,"output":0}
+      },
+      "toggle-only": {
+        "reasoning": true,
+        "reasoning_options": [{"type":"toggle"}],
+        "modalities": {"input":["text"],"output":["text"]},
+        "provider": {"npm":"@ai-sdk/anthropic","api":"https://opencode.ai/inference/anthropic/v1"},
+        "cost": {"input":0,"output":0}
+      },
+      "budget-minimum": {
+        "reasoning": true,
+        "reasoning_options": [{"type":"budget_tokens","min":1024}],
+        "modalities": {"input":["text","image","pdf"],"output":["text"]},
+        "limit": {"output":64000},
+        "provider": {"npm":"@ai-sdk/anthropic","api":"https://opencode.ai/inference/anthropic/v1"},
+        "cost": {"input":0,"output":0}
+      },
+      "budget-maximum": {
+        "reasoning": true,
+        "reasoning_options": [{"type":"toggle"},{"type":"budget_tokens","max":81920}],
+        "modalities": {"input":["text","audio"],"output":["text","audio"]},
+        "provider": {"npm":"@ai-sdk/google","api":"https://opencode.ai/inference/google/v1beta"},
+        "cost": {"input":0,"output":0}
+      },
+      "reasoning-unspecified": {"reasoning":true,"cost":{"input":0,"output":0}},
+      "metadata-missing": {"cost":{"input":0,"output":0}},
+      "reasoning-disabled": {"reasoning":false,"reasoning_options":[{"type":"effort","values":["high"]}],"cost":{"input":0,"output":0}},
+      "unknown-option": {"reasoning_options":[{"type":"future-option","values":["future"]}],"cost":{"input":0,"output":0}},
+      "paid": {"reasoning":true,"reasoning_options":[{"type":"effort","values":["max"]}],"cost":{"input":1,"output":1}},
+      "unknown-package": {"provider":{"npm":"@future/unsupported"},"reasoning":true,"cost":{"input":0,"output":0}},
+      "non-text": {"modalities":{"input":["image"],"output":["image"]},"cost":{"input":0,"output":0}},
+      "deprecated": {"status":"deprecated","reasoning":true,"cost":{"input":0,"output":0}}
+    }
+  }
+}

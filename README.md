@@ -16,6 +16,7 @@ A high-performance C-shared plugin for [CLIProxyAPI](https://github.com/router-f
   - Transparently manages gateway-required fingerprint tools while isolating and preserving downstream client tool calls.
   - Native streaming adaptation so both streaming and non-streaming downstream clients work reliably.
 - **Full Cross-Protocol Compatibility**: Compatible with OpenAI Chat Completions (`/v1/chat/completions`) and OpenAI Responses API (`/v1/responses`), with automatic protocol and reasoning control normalization.
+- **Declared Model Capabilities**: Registers upstream-declared reasoning options, token limits, and input/output modalities without inventing missing values. See [capability metadata, API visibility and request limits](docs/MODEL-CAPABILITIES.md).
 - **Console Workspace & Service Key**: Connect your OpenCode Console service keys for access to paid/custom models with session continuity and prompt caching.
 
 ---

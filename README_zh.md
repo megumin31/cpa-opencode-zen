@@ -16,6 +16,7 @@
   - 透明注入并隔离网关必须的指纹验证工具，对下游客户端自定义工具调用（Tool Calls）零干扰并完整透传。
   - 原生流式自适应，确保流式（streaming）与非流式（non-streaming）下游客户端均能稳定接收响应。
 - **全协议跨端兼容**：全面兼容 OpenAI Chat Completions（`/v1/chat/completions`）与 OpenAI Responses API（`/v1/responses`），自动完成协议规范化与推理控制字段映射。
+- **模型能力元数据**：接入目录明确声明的推理选项、上下文与输出限制、输入输出模态；缺失值不猜测。详见[能力元数据、宿主接口可见范围及请求边界](docs/MODEL-CAPABILITIES.md)。
 - **Console 工作区与 Service Key**：支持配置 OpenCode Console 服务密钥，使用会话持久化和 Prompt 缓存调用自定义付费模型。
 
 ---
