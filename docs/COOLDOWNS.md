@@ -33,15 +33,5 @@ shared library, or process restart constructs a new Engine and does **not**
 persist the old gates. There is no state export, automatic migration, or seed
 configuration in this change.
 
-Do not use an upgrade to erase an active upstream restriction. Before replacing
-an older credential-scoped implementation, keep each known restricted model
-unavailable across the restart using an explicitly approved host-side guard,
-covering every alias and variant of that actual model. Keep the guard until the
-original effective restriction is known to have expired, and arrange its
-explicit removal. Do not infer the effective deadline from Retry-After alone if
-Retry-After-Ms might have been present. If an equivalent guard or trustworthy
-expiry evidence is unavailable, leave the running instance in place and defer
-deployment. Do not clear all cooldown state to restore unrelated models.
-
 All scope/deadline tests use synthetic credentials, injected clocks and fake
 HTTP transports; no live provider inference is needed to validate this behavior.
