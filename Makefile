@@ -57,6 +57,10 @@ hostcheck: build build-hostcheck
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --cancel-first "$(abspath build)"
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --reconfigure "$(abspath build)"
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --reenable "$(abspath build)"
+	@set -eu; filename="$$($(GO) run -ldflags "$(VERSION_LDFLAGS)" ./cmd/buildmeta --field filename)"; \
+	for scenario in success truncated error; do \
+	  $(GO) -C cmd/hostcheck run ./httpframing -plugin "$(abspath build)/$$filename" -matrix -scenario "$$scenario"; \
+	done
 
 # Deliberately outside check-offline: the pinned host's disable-path regression
 # remains a strict, separately reportable failure. Never suppress its exit code.

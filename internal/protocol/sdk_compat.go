@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 
@@ -187,4 +188,53 @@ func sdkResponseBody(r catalog.Route, body []byte) ([]byte, error) {
 		}
 	}
 	return json.Marshal(obj)
+}
+
+// The pinned Responses-to-Gemini converter sets finishReason for incomplete
+// responses and tools, but omits it for successfully completed text. Add STOP
+// only at a validated response.completed event and only if no finish was emitted.
+// Keep the final usage record and all content unchanged; errors/truncation never
+// enter the completed branch.
+func completeResponsesGemini(chunks [][]byte, completed bool, finished *bool) ([][]byte, error) {
+	var last map[string]any
+	for _, chunk := range chunks {
+		var obj map[string]any
+		if json.Unmarshal(bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(chunk), []byte("data:"))), &obj) != nil || obj == nil {
+			return nil, fault.New(502, "invalid converted Gemini stream payload")
+		}
+		for _, candidate := range list(obj["candidates"]) {
+			if reason, _ := object(candidate)["finishReason"].(string); reason != "" {
+				*finished = true
+			}
+		}
+		last = obj
+	}
+	if !completed || *finished {
+		return chunks, nil
+	}
+	if last == nil {
+		last = map[string]any{}
+	}
+	candidates := list(last["candidates"])
+	if len(candidates) == 0 {
+		candidates = []any{map[string]any{"index": 0}}
+	}
+	candidate := object(candidates[0])
+	if candidate == nil {
+		candidate = map[string]any{"index": 0}
+		candidates[0] = candidate
+	}
+	candidate["finishReason"] = "STOP"
+	last["candidates"] = candidates
+	raw, err := json.Marshal(last)
+	if err != nil {
+		return nil, fault.New(502, "invalid converted Gemini completion")
+	}
+	if len(chunks) == 0 {
+		chunks = append(chunks, raw)
+	} else {
+		chunks[len(chunks)-1] = raw
+	}
+	*finished = true
+	return chunks, nil
 }

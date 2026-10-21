@@ -398,12 +398,15 @@ streamLoop:
 			if chunk.Err != nil {
 				return fmt.Errorf("native stream chunk: %w", chunk.Err)
 			}
+			if !json.Valid(chunk.Payload) {
+				return fmt.Errorf("Chat executor chunk is not JSON: %q", chunk.Payload)
+			}
 			received.Write(chunk.Payload)
 		case <-streamDeadline.C:
 			return fmt.Errorf("native stream waited for EOF after terminal SSE")
 		}
 	}
-	for _, marker := range []string{"Hello native host", `"total_tokens":7`, "data: [DONE]"} {
+	for _, marker := range []string{"Hello native host", `"total_tokens":7`, `"finish_reason":"stop"`} {
 		if !strings.Contains(received.String(), marker) {
 			return fmt.Errorf("native stream missing %q: %s", marker, received.String())
 		}
@@ -412,7 +415,7 @@ streamLoop:
 		return err
 	}
 	host.CompleteRequest(ctx, pluginapi.RequestCompletion{RequestID: "stream"})
-	fmt.Println("PASS: native host streaming callbacks preserve SSE and terminate promptly on [DONE] with upstream kept open")
+	fmt.Println("PASS: native host streaming callbacks preserve JSON and terminate promptly on upstream [DONE] with upstream kept open")
 
 	if mode == "reenable" {
 		// All initial requests have completed. Do not exercise the separate

@@ -295,6 +295,7 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 		original, _ = json.Marshal(originalObject)
 	}
 	var param any
+	geminiFinished := false
 	completion := newStreamCompletion(route.Protocol, route)
 	var process func(sseEvent) error
 	process = func(e sseEvent) error {
@@ -343,6 +344,12 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 		if err := translationError(param); err != nil {
 			return err
 		}
+		if up == translator.FormatOpenAIResponse && output == translator.FormatGemini {
+			chunks, err = completeResponsesGemini(chunks, obj["type"] == "response.completed", &geminiFinished)
+			if err != nil {
+				return err
+			}
+		}
 		for _, chunk := range chunks {
 			if wire := streamFrame(chunk); len(wire) > 0 {
 				if err := emit(wire); err != nil {
@@ -370,6 +377,23 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 	if route.Protocol == "openai" && !completion.done {
 		if err := process(sseEvent{Data: []byte("[DONE]")}); err != nil && !errors.Is(err, errTerminal) {
 			return err
+		}
+	}
+	// Gemini has no wire [DONE] sentinel. The pinned Gemini-to-Claude SDK
+	// converter nevertheless requires an explicit flush to emit message_stop.
+	// Only flush after clean EOF and validated finishReason/promptFeedback, so
+	// truncated or failed streams cannot become apparent successful completions.
+	if up == translator.FormatGemini && output == translator.FormatClaude {
+		chunks := registry.TranslateStream(ctx, up, output, route.Alias, original, request, []byte("[DONE]"), &param)
+		if err := translationError(param); err != nil {
+			return err
+		}
+		for _, chunk := range chunks {
+			if wire := streamFrame(chunk); len(wire) > 0 {
+				if err := emit(wire); err != nil {
+					return fault.New(499, "downstream stream closed")
+				}
+			}
 		}
 	}
 	if up != output && output == translator.FormatOpenAI {

@@ -98,11 +98,28 @@ execution, or explicit reload. An idle Console configuration change may therefor
 not update registered models until such an action occurs. This is deliberately
 not worked around by labeling API keys as OAuth credentials.
 
-### Gemini executor streaming boundary
+### Executor streaming boundaries
 
-The pinned CPA v8.0.29 Gemini handler owns SSE framing: `alt=sse` and `$alt=sse`
-are normalized to the default mode, which wraps each executor chunk in one
-`data:` envelope. The plugin therefore emits compact JSON records, not complete
-SSE frames, at its Gemini host boundary. Non-SSE alternate modes receive those
-same records directly, matching CPA's native executor. Internal SSE parsing,
-completion validation, and other protocols' wire frames are unchanged.
+CPA v8.0.29 handlers do not share one executor chunk format:
+
+- Chat Completions consumes compact JSON records and adds its own SSE `data:`
+  envelope. Its handler emits the final `[DONE]`; the plugin consumes the
+  upstream sentinel after validating completion, rather than forwarding it.
+- Gemini also consumes compact JSON records. `alt=sse` and `$alt=sse` are
+  normalized to default mode, which adds SSE framing. Non-SSE alternate modes
+  receive the same JSON records directly, matching CPA's native executor.
+- Responses and Claude consume complete SSE frames, including their named
+  events and protocol-specific terminal events. Those frames remain unchanged.
+
+The plugin keeps wire parsing/conversion and upstream completion validation
+separate from this final host-boundary adaptation. A valid upstream stream must
+not be judged solely by HTTP 200 or by finding text inside a raw chunk. The
+`httpframing` integration harness exercises the real native plugin and pinned
+SDK HTTP handlers, then strictly parses their final SSE output.
+
+Two pinned-SDK converter terminal gaps are adapted after validating upstream
+completion: Gemini-to-Claude receives its required internal flush to emit
+`message_stop`; Responses-to-Gemini gains `finishReason: STOP` on successful
+text completion when no finish reason was already emitted. Incomplete responses
+retain their mapped reason, tool finishes are not duplicated, and upstream
+errors or truncation do not gain success markers.

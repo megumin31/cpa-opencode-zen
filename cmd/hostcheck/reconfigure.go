@@ -100,12 +100,15 @@ streamLoop:
 			if chunk.Err != nil {
 				return fmt.Errorf("new stream after lifecycle transition: %w", chunk.Err)
 			}
+			if !json.Valid(chunk.Payload) {
+				return fmt.Errorf("Chat executor chunk is not JSON: %q", chunk.Payload)
+			}
 			received.Write(chunk.Payload)
 		case <-deadline.C:
 			return fmt.Errorf("stream after lifecycle transition did not complete")
 		}
 	}
-	for _, marker := range []string{"Hello native host", `"total_tokens":7`, "data: [DONE]"} {
+	for _, marker := range []string{"Hello native host", `"total_tokens":7`, `"finish_reason":"stop"`} {
 		if !strings.Contains(received.String(), marker) {
 			return fmt.Errorf("stream after lifecycle transition missing %q: %s", marker, received.String())
 		}
