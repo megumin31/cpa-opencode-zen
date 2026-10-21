@@ -1,7 +1,8 @@
-# Retry-After scope
+# Model-scoped cooldowns
 
-HTTP 429 and 503 inference responses with a valid Retry-After restriction create
-a local gate for the credential fingerprint and **final upstream model**. A
+Every HTTP 429 inference response starts a fixed **three-minute** cooldown,
+ignoring Retry-After and Retry-After-Ms (including missing or invalid headers).
+HTTP 503 responses with a valid Retry-After restriction create a local gate for the credential fingerprint and **final upstream model**. A
 status code alone does not establish an account-wide quota or outage, so both
 statuses use the same model scope. No undocumented error-string or header
 heuristics promote a restriction to account scope.
@@ -16,10 +17,11 @@ options alone cannot bypass it. Actual upstream model IDs remain case-sensitive;
 the plugin does not guess that arbitrary suffixes in real model IDs are aliases.
 Unknown client aliases still fail route lookup instead of creating a new scope.
 
-Retry-After-Ms takes precedence when valid, including fractional milliseconds;
-otherwise Retry-After accepts nonnegative integer seconds or an HTTP date. The
-server's full deadline is retained. Local checks do not refresh or extend it,
+For HTTP 503 only, Retry-After-Ms takes precedence when valid, including fractional
+milliseconds; otherwise Retry-After accepts nonnegative integer seconds or an HTTP
+date. The server's full 503 deadline is retained. Local checks do not refresh or extend it,
 and a shorter concurrent upstream response cannot shorten a longer restriction.
+A new real upstream 429 after expiry starts a new three-minute window.
 The plugin neither sleeps, retries inference, rotates credentials nor switches
 models. An explicit request for an unrelated model or distinct credential is
 checked against its own gate. SSE errors carried by a successful HTTP response

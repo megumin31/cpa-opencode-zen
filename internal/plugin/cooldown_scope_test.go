@@ -93,14 +93,14 @@ func TestCooldownHeadersKeepExactDeadlineWithoutLocalExtension(t *testing.T) {
 			clock := newEngineFixtureClock(start)
 			s := cooldownStore{entries: make(map[cooldownKey]cooldown), now: clock.now}
 			key := cooldownKey{credential: "synthetic-fingerprint", model: "limited-model"}
-			s.rememberHeaders(key, 429, tc.headers)
+			s.rememberHeaders(key, 503, tc.headers)
 			want := start.Add(tc.delay)
 			if got := s.entries[key].until; !got.Equal(want) {
 				t.Fatalf("deadline=%s, want %s", got, want)
 			}
 			clock.advance(tc.delay - time.Nanosecond)
 			for range 3 {
-				engineFixtureStatus(t, s.check(key), 429)
+				engineFixtureStatus(t, s.check(key), 503)
 				if got := s.entries[key].until; !got.Equal(want) {
 					t.Fatal("local check extended the upstream deadline", got, want)
 				}
@@ -117,7 +117,7 @@ func TestCooldownOnlyUpstreamRestrictionCanExtendDeadline(t *testing.T) {
 	clock := newEngineFixtureClock(time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC))
 	s := cooldownStore{entries: make(map[cooldownKey]cooldown), now: clock.now}
 	key := cooldownKey{credential: "synthetic-fingerprint", model: "limited-model"}
-	s.rememberAfter(key, 429, "60")
+	s.rememberAfter(key, 503, "60")
 	original := s.entries[key]
 	for _, value := range []string{"", "invalid", "-1", "0", "10", clock.now().Add(-time.Hour).Format(http.TimeFormat)} {
 		s.rememberAfter(key, 503, value)
@@ -201,7 +201,7 @@ func TestExecuteCooldownModelScopeSurvivesReload(t *testing.T) {
 			if limitedCalls.Load() != 2 {
 				t.Fatal("explicit distinct credential inherited another credential's restriction")
 			}
-			clock.advance(30 * time.Second)
+			clock.advance(deadline.Sub(clock.now()))
 			engineFixtureStatus(t, execute("a", c), status)
 			if limitedCalls.Load() != 3 {
 				t.Fatal("reload or local retry extended original deadline")

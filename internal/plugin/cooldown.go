@@ -12,8 +12,8 @@ import (
 	"github.com/megumin31/cpa-opencode-zen/internal/catalog"
 )
 
-// The ABI cannot attach headers to an RPC error. Keep upstream Retry-After as a
-// credential-and-upstream-model gate so host retries cannot resend early.
+// The ABI cannot attach headers to an RPC error. Gate each credential and model:
+// HTTP 429 uses a fixed three minutes; HTTP 503 retains upstream Retry-After.
 // Neither 429 nor 503 alone establishes an account-wide restriction. No sleeps,
 // credential rotation, or inference retries are performed by this plugin.
 type cooldownStore struct {
@@ -56,10 +56,16 @@ type cooldown struct {
 	status int
 }
 
-// Native na prefers retry-after-ms over Retry-After. Keep the existing local
-// 429/503 gate; the host ABI still cannot convey original retry response headers.
+const rateLimitCooldown = 3 * time.Minute
+
+// A real HTTP 429 always starts a fixed cooldown, even without valid headers.
+// Only HTTP 503 uses upstream retry timing (milliseconds take precedence).
 func (s *cooldownStore) rememberHeaders(key cooldownKey, status int, headers http.Header) {
-	if status != 429 && status != 503 {
+	if status == http.StatusTooManyRequests {
+		s.remember(key, status, s.now().Add(rateLimitCooldown))
+		return
+	}
+	if status != http.StatusServiceUnavailable {
 		return
 	}
 	if value := strings.TrimSpace(headers.Get("Retry-After-Ms")); value != "" {
@@ -77,7 +83,11 @@ func (s *cooldownStore) rememberHeaders(key cooldownKey, status int, headers htt
 }
 
 func (s *cooldownStore) rememberAfter(key cooldownKey, status int, value string) {
-	if status != 429 && status != 503 {
+	if status == http.StatusTooManyRequests {
+		s.remember(key, status, s.now().Add(rateLimitCooldown))
+		return
+	}
+	if status != http.StatusServiceUnavailable {
 		return
 	}
 	value = strings.TrimSpace(value)
@@ -123,6 +133,9 @@ func (s *cooldownStore) check(key cooldownKey) error {
 	if !item.until.After(s.now()) {
 		delete(s.entries, key)
 		return nil
+	}
+	if item.status == http.StatusTooManyRequests {
+		return fail(item.status, "OpenCode three-minute rate-limit cooldown is still active for this model")
 	}
 	return fail(item.status, "OpenCode retry-after interval is still active for this model")
 }

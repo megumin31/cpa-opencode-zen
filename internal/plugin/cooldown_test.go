@@ -25,7 +25,7 @@ func TestRetryAfterGate(t *testing.T) {
 	if e := engine.cooldowns.check(cooldownKey{credential: other.fingerprint(), model: "m"}); e != nil {
 		t.Fatal("cross credential restriction")
 	}
-	current = current.Add(121 * time.Second)
+	current = current.Add(180 * time.Second)
 	if e := engine.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}); e != nil {
 		t.Fatal(e)
 	}

@@ -155,7 +155,7 @@ func TestEngineInstancesIsolateClockLogsHTTPAndMutableCaches(t *testing.T) {
 		t.Fatal("cooldown leaked to second engine", err)
 	}
 	second.cooldowns.rememberAfter(cooldownKey{credential: c.fingerprint(), model: "m"}, 503, "10")
-	firstClock.advance(11 * time.Second)
+	firstClock.advance(180 * time.Second)
 	if err := first.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}); err != nil {
 		t.Fatal("first clock advance did not expire its cooldown", err)
 	}
@@ -284,7 +284,7 @@ func TestEngineReconfigurePreservesAffinityAndCooldownButReplacesGenerationState
 	if freshRoutes["opencode/p/m"].ModelID != "generation-model-2" || consoleCalls.Load() != 2 {
 		t.Fatal("fresh generation served stale route cache")
 	}
-	clock.advance(61 * time.Second)
+	clock.advance(180 * time.Second)
 	if err := e.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}); err != nil {
 		t.Fatal("retained cooldown no longer follows injected clock", err)
 	}

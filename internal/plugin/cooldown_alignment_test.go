@@ -17,7 +17,7 @@ func TestRetryAfterMillisecondsPrecedence(t *testing.T) {
 	engine.cooldowns.Lock()
 	delete(engine.cooldowns.entries, cooldownKey{credential: c.fingerprint(), model: "m"})
 	engine.cooldowns.Unlock()
-	engine.cooldowns.rememberHeaders(cooldownKey{credential: c.fingerprint(), model: "m"}, 429, http.Header{"Retry-After-Ms": {"1500"}, "Retry-After": {"99"}})
+	engine.cooldowns.rememberHeaders(cooldownKey{credential: c.fingerprint(), model: "m"}, 503, http.Header{"Retry-After-Ms": {"1500"}, "Retry-After": {"99"}})
 	if engine.cooldowns.check(cooldownKey{credential: c.fingerprint(), model: "m"}) == nil {
 		t.Fatal("missing gate")
 	}
