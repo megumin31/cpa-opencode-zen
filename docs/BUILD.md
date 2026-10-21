@@ -44,7 +44,7 @@ runs these stages serially and stops at the first failed command:
 7. `go run ./cmd/sdkrepro`, which explicitly asserts the known pinned SDK behavior.
 8. A fresh root-package C-shared build and native host harness build.
 9. Real native-host `--quiesce`, `--cancel-first`, `--reconfigure`, and `--reenable` smoke tests against loopback.
-10. Real native plugin plus SDK HTTP-handler framing/completion matrix (`httpframing -matrix`), covering success, truncation and upstream error, including the explicitly unsupported Claude-to-Gemini rejection.
+10. Real native plugin plus SDK HTTP-handler framing/completion matrix (`httpframing -matrix`), covering success, truncation, upstream error, blocked/empty Gemini feedback and Responses tool sequences (success/error/incomplete/cancellation), including the explicitly unsupported Claude-to-Gemini rejection.
 11. Read-only preflight of the generated plugin directory.
 
 `go test ./...` does not traverse nested modules, execute `main` commands, run

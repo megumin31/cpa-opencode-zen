@@ -120,6 +120,16 @@ SDK HTTP handlers, then strictly parses their final SSE output.
 Two pinned-SDK converter terminal gaps are adapted after validating upstream
 completion: Gemini-to-Claude receives its required internal flush to emit
 `message_stop`; Responses-to-Gemini gains `finishReason: STOP` on successful
-text completion when no finish reason was already emitted. Incomplete responses
-retain their mapped reason, tool finishes are not duplicated, and upstream
-errors or truncation do not gain success markers.
+text completion. Responses tool records never finish the whole response:
+intermediate SDK finish flags are removed, and exactly one final reason is
+emitted at response.completed or response.incomplete, preserving mapped
+incomplete reasons and usage. Each SDK pending-tool record is drained immediately
+through its pinned empty-reasoning path and checked before removing the synthetic
+record, avoiding single-slot overwrites of consecutive tool calls without
+reimplementing SDK tool-name/id mapping.
+
+Gemini promptFeedback block reasons are preserved for native Gemini output.
+Cross-protocol conversions fail closed with an explicit error because the pinned
+converters cannot safely preserve that refusal. Empty/unspecified feedback is
+not proof of completion. Errors, truncation and cancellation do not gain success
+markers.

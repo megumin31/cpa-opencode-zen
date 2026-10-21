@@ -58,7 +58,7 @@ hostcheck: build build-hostcheck
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --reconfigure "$(abspath build)"
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --reenable "$(abspath build)"
 	@set -eu; filename="$$($(GO) run -ldflags "$(VERSION_LDFLAGS)" ./cmd/buildmeta --field filename)"; \
-	for scenario in success truncated error; do \
+	for scenario in success truncated error blocked empty-feedback responses-tools responses-tools-error responses-tools-incomplete responses-tools-cancel; do \
 	  $(GO) -C cmd/hostcheck run ./httpframing -plugin "$(abspath build)/$$filename" -matrix -scenario "$$scenario"; \
 	done
 

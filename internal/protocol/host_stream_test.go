@@ -190,20 +190,19 @@ func TestGeminiToClaudeFlushesOnlyValidatedCompletion(t *testing.T) {
 
 func TestResponsesGeminiCompletionRepair(t *testing.T) {
 	for _, tc := range []struct {
-		name               string
-		chunks             [][]byte
-		completed, already bool
-		want               string
+		name      string
+		chunks    [][]byte
+		eventType string
+		want      string
 	}{
-		{"text", [][]byte{[]byte(`{"candidates":[{"index":0,"content":{"parts":[]}}],"usageMetadata":{"totalTokenCount":19}}`)}, true, false, "STOP"},
-		{"incomplete", [][]byte{[]byte(`{"candidates":[{"finishReason":"MAX_TOKENS"}]}`)}, false, false, "MAX_TOKENS"},
-		{"tool_already_finished", [][]byte{[]byte(`{"usageMetadata":{"totalTokenCount":19}}`)}, true, true, ""},
-		{"tool_same_event", [][]byte{[]byte(`{"candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"name":"weather"}}]}}]}`), []byte(`{"usageMetadata":{"totalTokenCount":19}}`)}, true, false, "STOP"},
-		{"nonterminal", [][]byte{[]byte(`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`)}, false, false, ""},
+		{"text", [][]byte{[]byte(`{"candidates":[{"index":0,"content":{"parts":[]}}],"usageMetadata":{"totalTokenCount":19}}`)}, "response.completed", "STOP"},
+		{"incomplete", [][]byte{[]byte(`{"candidates":[{"finishReason":"MAX_TOKENS"}]}`)}, "response.incomplete", "MAX_TOKENS"},
+		{"tool_completion_usage", [][]byte{[]byte(`{"usageMetadata":{"totalTokenCount":19}}`)}, "response.completed", "STOP"},
+		{"tool_same_event", [][]byte{[]byte(`{"candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"name":"weather"}}]}}]}`), []byte(`{"usageMetadata":{"totalTokenCount":19}}`)}, "response.completed", "STOP"},
+		{"nonterminal", [][]byte{[]byte(`{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`)}, "response.output_text.delta", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			finished := tc.already
-			out, err := completeResponsesGemini(tc.chunks, tc.completed, &finished)
+			out, err := completeResponsesGemini(tc.chunks, tc.eventType)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -228,5 +227,69 @@ func TestResponsesGeminiCompletionRepair(t *testing.T) {
 				t.Fatal("lost usage")
 			}
 		})
+	}
+}
+
+func TestGeminiBlockedAndEmptyFeedback(t *testing.T) {
+	for _, feedback := range []string{`{"blockReason":"SAFETY"}`, `{}`, `{"blockReason":"BLOCK_REASON_UNSPECIFIED"}`} {
+		for _, out := range []translator.Format{translator.FormatOpenAI, translator.FormatClaude, translator.FormatOpenAIResponse, translator.FormatGemini} {
+			t.Run(feedback+"/"+out.String(), func(t *testing.T) {
+				emitted := 0
+				err := ForwardToHost(context.Background(), strings.NewReader("data: {\"promptFeedback\":"+feedback+"}\n\n"), catalog.Route{Protocol: "gemini", Alias: "m"}, out, nil, nil, func(b []byte) error { emitted++; return nil })
+				nativeBlocked := out == translator.FormatGemini && strings.Contains(feedback, "SAFETY")
+				if (err == nil) != nativeBlocked {
+					t.Fatalf("error=%v nativeBlocked=%v", err, nativeBlocked)
+				}
+				if strings.Contains(feedback, "SAFETY") && !nativeBlocked && emitted != 0 {
+					t.Fatal("blocked response reached converter")
+				}
+			})
+		}
+	}
+}
+
+func TestGeminiToolDrainRejectsUnexpectedShapes(t *testing.T) {
+	goodTool := []byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","id":"call_1","args":{}}}]}}]}`)
+	goodSynthetic := []byte(`{"candidates":[{"content":{"parts":[{"thought":true,"text":""}]}}]}`)
+	for _, tc := range []struct {
+		name   string
+		chunks [][]byte
+		id     string
+		good   bool
+	}{
+		{"valid", [][]byte{goodTool, goodSynthetic}, "call_1", true},
+		{"missing tool", [][]byte{goodSynthetic}, "call_1", false},
+		{"wrong identity", [][]byte{goodTool, goodSynthetic}, "other", false},
+		{"real reasoning", [][]byte{goodTool, bytes.ReplaceAll(goodSynthetic, []byte(`"text":""`), []byte(`"text":"important"`))}, "call_1", false},
+		{"extra record", [][]byte{goodTool, goodSynthetic, goodSynthetic}, "call_1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := drainedResponsesGeminiTool(tc.chunks, map[string]any{"call_id": tc.id})
+			if (err == nil) != tc.good {
+				t.Fatalf("err=%v", err)
+			}
+			if tc.good && (len(out) != 1 || !bytes.Equal(out[0], goodTool)) {
+				t.Fatal("lost tool")
+			}
+		})
+	}
+}
+
+func TestResponsesToolThenFailureHasNoGeminiFinish(t *testing.T) {
+	created := `data: {"type":"response.created","response":{"id":"r","model":"m"}}` + "\n\n"
+	tool := `data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"c1","name":"weather","arguments":"{}"}}` + "\n\n"
+	text := `data: {"type":"response.output_text.delta","delta":"hello"}` + "\n\n"
+	for _, end := range []string{"", `data: {"type":"response.failed","response":{"error":{"message":"failed"}}}` + "\n\n"} {
+		var out bytes.Buffer
+		err := ForwardToHost(context.Background(), strings.NewReader(created+tool+text+end), catalog.Route{Protocol: "openai-response", Alias: "m"}, translator.FormatGemini, []byte(clientRequest("gemini")), []byte(clientRequest("openai-response")), func(b []byte) error { out.Write(b); return nil })
+		if err == nil {
+			t.Fatal("missing upstream error")
+		}
+		if strings.Contains(out.String(), "finishReason") {
+			t.Fatalf("premature finish: %s", out.String())
+		}
+		if !strings.Contains(out.String(), "weather") || !strings.Contains(out.String(), "hello") {
+			t.Fatal("lost delivered content")
+		}
 	}
 }

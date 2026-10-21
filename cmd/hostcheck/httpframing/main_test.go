@@ -115,3 +115,57 @@ func TestFailureValidationRejectsFalseSuccess(t *testing.T) {
 		})
 	}
 }
+
+func TestBlockedGeminiValidation(t *testing.T) {
+	blocked := scenarioStream("gemini", "blocked", "")
+	if err := validateBlockedGemini(200, "text/event-stream", blocked); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"empty feedback":   scenarioStream("gemini", "empty-feedback", ""),
+		"invented success": strings.Replace(blocked, `{"promptFeedback"`, `{"candidates":[{"finishReason":"STOP"}],"promptFeedback"`, 1),
+		"double framing":   "data: " + blocked,
+		"duplicate event":  blocked + blocked,
+		"truncated":        strings.TrimSuffix(blocked, "\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if validateBlockedGemini(200, "text/event-stream", body) == nil {
+				t.Fatal("accepted malformed blocked response")
+			}
+		})
+	}
+}
+
+func TestToolCompletionValidation(t *testing.T) {
+	alpha := `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"alpha","id":"call_alpha","args":{"value":1}}}]}}]}` + "\n\n"
+	beta := `data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"beta","id":"call_beta","args":{"value":2}}}]}}]}` + "\n\n"
+	text := `data: {"candidates":[{"content":{"parts":[{"text":"OK"}]}}]}` + "\n\n"
+	finish := `data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}` + "\n\n"
+	valid := alpha + beta + text + finish
+	if err := validateToolGemini(valid); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"lost first tool": beta + text + finish,
+		"duplicate tool":  alpha + alpha + beta + text + finish,
+		"early finish":    alpha + beta + finish + text,
+		"wrong arguments": strings.Replace(valid, `"value":1`, `"value":99`, 1),
+		"wrong identity":  strings.Replace(valid, "call_alpha", "call_unknown", 1),
+		"missing usage":   strings.Replace(valid, `,"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}`, "", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if validateToolGemini(body) == nil {
+				t.Fatal("accepted damaged tool response")
+			}
+		})
+	}
+	if err := validateCancelled(alpha + beta + text); err != nil {
+		t.Fatal(err)
+	}
+	if validateCancelled(valid) == nil {
+		t.Fatal("accepted success on cancellation")
+	}
+	if validateCancelled("") == nil {
+		t.Fatal("cancellation must exercise an emitted stream")
+	}
+}

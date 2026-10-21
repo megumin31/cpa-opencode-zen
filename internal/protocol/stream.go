@@ -176,7 +176,8 @@ func terminal(protocol string, e sseEvent, obj map[string]any) bool {
 				return true
 			}
 		}
-		return obj["promptFeedback"] != nil
+		reason, _ := object(obj["promptFeedback"])["blockReason"].(string)
+		return reason != "" && reason != "BLOCK_REASON_UNSPECIFIED"
 	}
 	return false
 }
@@ -295,7 +296,6 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 		original, _ = json.Marshal(originalObject)
 	}
 	var param any
-	geminiFinished := false
 	completion := newStreamCompletion(route.Protocol, route)
 	var process func(sseEvent) error
 	process = func(e sseEvent) error {
@@ -308,6 +308,11 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 			obj, err = eventObject(ctx, e)
 			if err != nil {
 				return err
+			}
+		}
+		if up == translator.FormatGemini && output != up {
+			if reason, _ := object(obj["promptFeedback"])["blockReason"].(string); reason != "" && reason != "BLOCK_REASON_UNSPECIFIED" {
+				return fault.New(502, "upstream Gemini blocked the response; refusal cannot be safely converted")
 			}
 		}
 		if terminal(route.Protocol, e, obj) {
@@ -345,7 +350,21 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 			return err
 		}
 		if up == translator.FormatOpenAIResponse && output == translator.FormatGemini {
-			chunks, err = completeResponsesGemini(chunks, obj["type"] == "response.completed", &geminiFinished)
+			if obj["type"] == "response.output_item.done" && object(obj["item"])["type"] == "function_call" {
+				if len(chunks) != 0 {
+					return fault.New(502, "unexpected Gemini tool converter output")
+				}
+				// Drain the pinned converter's single pending-tool slot immediately.
+				// Empty reasoning does not mark text as delivered; discard only its
+				// verified synthetic record, retaining SDK name/argument/id mapping.
+				drained := registry.TranslateStream(ctx, sdkUpstream(up, output), output, route.Alias, original, request, []byte(`data: {"type":"response.reasoning_summary_text.delta","delta":""}`), &param)
+				chunks, err = drainedResponsesGeminiTool(drained, object(obj["item"]))
+				if err != nil {
+					return err
+				}
+			}
+			eventType, _ := obj["type"].(string)
+			chunks, err = completeResponsesGemini(chunks, eventType)
 			if err != nil {
 				return err
 			}
@@ -381,7 +400,7 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 	}
 	// Gemini has no wire [DONE] sentinel. The pinned Gemini-to-Claude SDK
 	// converter nevertheless requires an explicit flush to emit message_stop.
-	// Only flush after clean EOF and validated finishReason/promptFeedback, so
+	// Only flush after clean EOF and validated finishReason, so
 	// truncated or failed streams cannot become apparent successful completions.
 	if up == translator.FormatGemini && output == translator.FormatClaude {
 		chunks := registry.TranslateStream(ctx, up, output, route.Alias, original, request, []byte("[DONE]"), &param)

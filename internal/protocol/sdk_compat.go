@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/megumin31/cpa-opencode-zen/internal/catalog"
 	"github.com/megumin31/cpa-opencode-zen/internal/fault"
@@ -190,51 +191,99 @@ func sdkResponseBody(r catalog.Route, body []byte) ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-// The pinned Responses-to-Gemini converter sets finishReason for incomplete
-// responses and tools, but omits it for successfully completed text. Add STOP
-// only at a validated response.completed event and only if no finish was emitted.
-// Keep the final usage record and all content unchanged; errors/truncation never
-// enter the completed branch.
-func completeResponsesGemini(chunks [][]byte, completed bool, finished *bool) ([][]byte, error) {
-	var last map[string]any
+// The pinned Responses-to-Gemini SDK assigns STOP to individual tool records,
+// but omits it for completed text. Only upstream terminal events may produce a
+// finish; put exactly one reason on the last (usage) record of that event.
+func completeResponsesGemini(chunks [][]byte, eventType string) ([][]byte, error) {
+	terminal := eventType == "response.completed" || eventType == "response.incomplete"
+	objects := make([]map[string]any, 0, len(chunks))
+	reason := ""
 	for _, chunk := range chunks {
 		var obj map[string]any
 		if json.Unmarshal(bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(chunk), []byte("data:"))), &obj) != nil || obj == nil {
 			return nil, fault.New(502, "invalid converted Gemini stream payload")
 		}
-		for _, candidate := range list(obj["candidates"]) {
-			if reason, _ := object(candidate)["finishReason"].(string); reason != "" {
-				*finished = true
+		for _, c := range list(obj["candidates"]) {
+			candidate := object(c)
+			if r, _ := candidate["finishReason"].(string); r != "" {
+				reason = r
 			}
+			delete(candidate, "finishReason")
 		}
-		last = obj
+		objects = append(objects, obj)
 	}
-	if !completed || *finished {
-		return chunks, nil
+	if terminal {
+		if eventType == "response.completed" {
+			reason = "STOP"
+		} else if reason == "" {
+			return nil, fault.New(502, "missing converted Gemini incomplete reason")
+		}
+		if len(objects) == 0 {
+			objects = append(objects, map[string]any{})
+		}
+		last := objects[len(objects)-1]
+		candidates := list(last["candidates"])
+		if len(candidates) == 0 {
+			candidates = []any{map[string]any{"index": 0}}
+		}
+		candidate := object(candidates[0])
+		if candidate == nil {
+			candidate = map[string]any{"index": 0}
+			candidates[0] = candidate
+		}
+		candidate["finishReason"] = reason
+		last["candidates"] = candidates
 	}
-	if last == nil {
-		last = map[string]any{}
+	out := make([][]byte, 0, len(objects))
+	for _, obj := range objects {
+		raw, err := json.Marshal(obj)
+		if err != nil {
+			return nil, fault.New(502, "invalid converted Gemini completion")
+		}
+		out = append(out, raw)
 	}
-	candidates := list(last["candidates"])
-	if len(candidates) == 0 {
-		candidates = []any{map[string]any{"index": 0}}
+	return out, nil
+}
+
+// Drain only the exact two-record shape of the pinned SDK. A future SDK change
+// must fail closed rather than lose a tool or leak our synthetic reasoning event.
+func drainedResponsesGeminiTool(chunks [][]byte, item map[string]any) ([][]byte, error) {
+	invalid := func() ([][]byte, error) { return nil, fault.New(502, "unexpected Gemini tool converter drain") }
+	if len(chunks) != 2 {
+		return invalid()
 	}
-	candidate := object(candidates[0])
-	if candidate == nil {
-		candidate = map[string]any{"index": 0}
-		candidates[0] = candidate
+	var tool, synthetic map[string]any
+	if json.Unmarshal(chunks[0], &tool) != nil || json.Unmarshal(chunks[1], &synthetic) != nil {
+		return invalid()
 	}
-	candidate["finishReason"] = "STOP"
-	last["candidates"] = candidates
-	raw, err := json.Marshal(last)
-	if err != nil {
-		return nil, fault.New(502, "invalid converted Gemini completion")
+	tc, sc := list(tool["candidates"]), list(synthetic["candidates"])
+	if len(tc) != 1 || len(sc) != 1 {
+		return invalid()
 	}
-	if len(chunks) == 0 {
-		chunks = append(chunks, raw)
-	} else {
-		chunks[len(chunks)-1] = raw
+	tp := list(object(object(tc[0])["content"])["parts"])
+	sp := list(object(object(sc[0])["content"])["parts"])
+	if len(tp) != 1 || len(sp) != 1 {
+		return invalid()
 	}
-	*finished = true
-	return chunks, nil
+	call := object(object(tp[0])["functionCall"])
+	thought := object(sp[0])
+	if call == nil || len(thought) != 2 || thought["thought"] != true || thought["text"] != "" {
+		return invalid()
+	}
+	id, _ := item["call_id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		id, _ = item["id"].(string)
+		id = strings.TrimSpace(id)
+	}
+	if id != "" && call["id"] != id {
+		return invalid()
+	}
+	if name, _ := call["name"].(string); name == "" {
+		return invalid()
+	}
+	if _, ok := call["args"].(map[string]any); !ok {
+		return invalid()
+	}
+	return chunks[:1], nil
 }

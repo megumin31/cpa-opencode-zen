@@ -21,6 +21,22 @@ explicit upstream SSE error after initial content. These runs require a visible
 error and reject synthesized success terminals. The unsupported pair still must
 be rejected explicitly.
 
+`-matrix -scenario blocked` checks only Gemini upstream: native Gemini must
+preserve `promptFeedback.blockReason: SAFETY` with no success candidates; the
+other three client formats must report an explicit blocked-conversion error.
+`-matrix -scenario empty-feedback` checks that empty prompt feedback is not
+misclassified as a terminal response and produces a visible failure in all four
+client formats, without successful completion.
+
+The `responses-tools`, `responses-tools-error`, `responses-tools-incomplete`
+and `responses-tools-cancel` scenarios scope the run to Responses → Gemini.
+Two consecutive function calls must preserve distinct names, IDs and arguments
+exactly once, followed by text. Completion retains exact usage and occurs only
+after content; incomplete completion must use `MAX_TOKENS`. The error case must
+not emit a success finish. Cancellation occurs after partial upstream SSE is
+flushed, checks that upstream request cancellation propagates within three
+seconds, and forbids synthesized completion. Use `-matrix` with these scenarios.
+
 Without `-matrix`, only the four native protocol paths run. With `-matrix`, all
 16 upstream/client combinations run: 15 supported streams must pass, and
 Claude-to-Gemini must return the existing explicit HTTP 400 unsupported-conversion
