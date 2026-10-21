@@ -162,7 +162,7 @@ func (e *Engine) execute(raw []byte, stream bool) (any, error) {
 					<-watcherDone
 				}
 			}()
-			err := protocol.Forward(ctx, resp.Body, r, output, req.Payload, payload, func(p []byte) error {
+			err := protocol.ForwardToHost(ctx, resp.Body, r, output, req.Payload, payload, func(p []byte) error {
 				if e.streams == nil {
 					return fail(500, "host stream callback unavailable")
 				}

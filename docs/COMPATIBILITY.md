@@ -97,3 +97,12 @@ scheduler excludes API-key auth when due; this plugin refreshes on discovery,
 execution, or explicit reload. An idle Console configuration change may therefore
 not update registered models until such an action occurs. This is deliberately
 not worked around by labeling API keys as OAuth credentials.
+
+### Gemini executor streaming boundary
+
+The pinned CPA v8.0.29 Gemini handler owns SSE framing: `alt=sse` and `$alt=sse`
+are normalized to the default mode, which wraps each executor chunk in one
+`data:` envelope. The plugin therefore emits compact JSON records, not complete
+SSE frames, at its Gemini host boundary. Non-SSE alternate modes receive those
+same records directly, matching CPA's native executor. Internal SSE parsing,
+completion validation, and other protocols' wire frames are unchanged.
