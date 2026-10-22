@@ -37,6 +37,34 @@ not emit a success finish. Cancellation occurs after partial upstream SSE is
 flushed, checks that upstream request cancellation propagates within three
 seconds, and forbids synthesized completion. Use `-matrix` with these scenarios.
 
+The `chat-gemini-*` scenarios exercise Chat → Gemini through the same real
+native plugin and SDK HTTP handler. Use `-matrix` with each:
+
+- `chat-gemini-combined`: text, finish reason and usage on one upstream chunk.
+- `chat-gemini-reasoning`: reasoning and text together with finish and usage.
+- `chat-gemini-split-usage`: an independent usage-only chunk after completion.
+- `chat-gemini-no-usage`, `chat-gemini-partial-usage`, `chat-gemini-zero-usage`:
+  absent fields remain absent, no token totals are inferred, and reported zeros
+  remain explicit.
+- `chat-gemini-length`, `chat-gemini-filtered`: `MAX_TOKENS` and `SAFETY` survive
+  combined final chunks rather than becoming `STOP`.
+- `chat-gemini-tools`: fragmented tool arguments end on a chunk that also carries
+  the finish reason and usage; name, ID and arguments appear exactly once.
+- `chat-gemini-truncated`, `chat-gemini-error`, `chat-gemini-cancel`: partial text
+  followed by premature EOF, upstream error or client cancellation never gains
+  a successful terminal. Cancellation must also close the upstream request.
+- `chat-gemini-refusal`, `chat-gemini-legacy-function-call`: fields unsupported
+  by the pinned converter produce explicit errors rather than silent empty
+  success.
+
+These cases require exactly one appropriate finish reason and compare the exact
+set and values of reported Gemini usage fields, including cached and reasoning
+tokens. They also reject duplicate content, tool calls, usage and terminals, or
+content appearing after the terminal. The original generic success matrix's
+Chat fixture puts finish and usage on an empty-delta chunk, so it does not cover
+the combined-content early-return defect; its generic validator also does not
+validate usage values.
+
 Without `-matrix`, only the four native protocol paths run. With `-matrix`, all
 16 upstream/client combinations run: 15 supported streams must pass, and
 Claude-to-Gemini must return the existing explicit HTTP 400 unsupported-conversion

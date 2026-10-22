@@ -58,7 +58,9 @@ hostcheck: build build-hostcheck
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --reconfigure "$(abspath build)"
 	timeout --signal=TERM --kill-after=5s $(HOSTCHECK_TIMEOUT) build/hostcheck --reenable "$(abspath build)"
 	@set -eu; filename="$$($(GO) run -ldflags "$(VERSION_LDFLAGS)" ./cmd/buildmeta --field filename)"; \
-	for scenario in success truncated error blocked empty-feedback responses-tools responses-tools-error responses-tools-incomplete responses-tools-cancel; do \
+	for scenario in success truncated error blocked empty-feedback responses-tools responses-tools-error responses-tools-incomplete responses-tools-cancel \
+	  chat-gemini-combined chat-gemini-reasoning chat-gemini-split-usage chat-gemini-no-usage chat-gemini-partial-usage chat-gemini-zero-usage \
+	  chat-gemini-length chat-gemini-filtered chat-gemini-tools chat-gemini-error chat-gemini-truncated chat-gemini-cancel chat-gemini-refusal chat-gemini-legacy-function-call; do \
 	  $(GO) -C cmd/hostcheck run ./httpframing -plugin "$(abspath build)/$$filename" -matrix -scenario "$$scenario"; \
 	done
 

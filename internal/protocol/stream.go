@@ -342,12 +342,22 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 			return err
 		}
 		data := append([]byte("data: "), bytes.TrimSpace(normalized)...)
+		var geminiUsage []byte
+		if up == translator.FormatOpenAI && output == translator.FormatGemini {
+			geminiUsage, err = prepareChatGeminiStream(obj)
+			if err != nil {
+				return err
+			}
+		}
 		var chunks [][]byte
 		for _, record := range translationRecords(up, output, data) {
 			chunks = append(chunks, registry.TranslateStream(ctx, sdkUpstream(up, output), output, route.Alias, original, request, record, &param)...)
 		}
 		if err := translationError(param); err != nil {
 			return err
+		}
+		if len(geminiUsage) > 0 {
+			chunks = append(chunks, geminiUsage)
 		}
 		if up == translator.FormatOpenAIResponse && output == translator.FormatGemini {
 			if obj["type"] == "response.output_item.done" && object(obj["item"])["type"] == "function_call" {
@@ -370,6 +380,9 @@ func Forward(ctx context.Context, r io.Reader, route catalog.Route, output trans
 			}
 		}
 		for _, chunk := range chunks {
+			if output == translator.FormatGemini && ctx.Err() != nil {
+				return contextFailure(ctx)
+			}
 			if wire := streamFrame(chunk); len(wire) > 0 {
 				if err := emit(wire); err != nil {
 					return fault.New(499, "downstream stream closed")
@@ -689,32 +702,6 @@ func (a *streamAggregate) finish() ([]byte, error) {
 		}
 	}
 	return json.Marshal(a.result)
-}
-
-// The pinned OpenAI-to-Gemini converter returns after tool deltas and otherwise
-// misses a finish_reason on that same choice. Split only that semantic boundary.
-func translationRecords(up, out translator.Format, data []byte) [][]byte {
-	if up != translator.FormatOpenAI || out != translator.FormatGemini {
-		return [][]byte{data}
-	}
-	var obj map[string]any
-	if json.Unmarshal(bytes.TrimSpace(bytes.TrimPrefix(data, []byte("data:"))), &obj) != nil {
-		return [][]byte{data}
-	}
-	tails := []any{}
-	for _, v := range list(obj["choices"]) {
-		c := object(v)
-		if c["finish_reason"] != nil && object(c["delta"])["tool_calls"] != nil {
-			tails = append(tails, map[string]any{"index": c["index"], "delta": map[string]any{}, "finish_reason": c["finish_reason"]})
-			delete(c, "finish_reason")
-		}
-	}
-	if len(tails) == 0 {
-		return [][]byte{data}
-	}
-	first, _ := json.Marshal(obj)
-	last, _ := json.Marshal(map[string]any{"id": obj["id"], "model": obj["model"], "choices": tails})
-	return [][]byte{append([]byte("data: "), first...), append([]byte("data: "), last...)}
 }
 
 func contextFailure(ctx context.Context) error {

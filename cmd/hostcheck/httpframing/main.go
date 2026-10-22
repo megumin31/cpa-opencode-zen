@@ -41,7 +41,7 @@ var protocols = []string{"chat", "responses", "anthropic", "gemini"}
 func main() {
 	plugin := flag.String("plugin", "", "absolute path to versioned native plugin library")
 	matrix := flag.Bool("matrix", false, "also exercise all cross-protocol conversions")
-	scenario := flag.String("scenario", "success", "upstream scenario: success, truncated, error, blocked, empty-feedback, responses-tools, responses-tools-error, responses-tools-cancel, responses-tools-incomplete")
+	scenario := flag.String("scenario", "success", "upstream scenario (see httpframing/README.md)")
 	flag.Parse()
 	if *plugin == "" {
 		fmt.Fprintln(os.Stderr, "-plugin is required")
@@ -58,7 +58,8 @@ func main() {
 func run(pluginPath string, matrix bool) error { return runScenario(pluginPath, matrix, "success") }
 
 func runScenario(pluginPath string, matrix bool, scenario string) error {
-	if scenario != "success" && scenario != "truncated" && scenario != "error" && scenario != "blocked" && scenario != "empty-feedback" && scenario != "responses-tools" && scenario != "responses-tools-error" && scenario != "responses-tools-cancel" && scenario != "responses-tools-incomplete" {
+	chatGeminiSpec, chatGemini := chatGeminiScenario(scenario)
+	if !chatGemini && scenario != "success" && scenario != "truncated" && scenario != "error" && scenario != "blocked" && scenario != "empty-feedback" && scenario != "responses-tools" && scenario != "responses-tools-error" && scenario != "responses-tools-cancel" && scenario != "responses-tools-incomplete" {
 		return fmt.Errorf("unknown scenario %q", scenario)
 	}
 	gin.SetMode(gin.ReleaseMode)
@@ -125,13 +126,17 @@ func runScenario(pluginPath string, matrix bool, scenario string) error {
 					reject("invalid request JSON")
 					return
 				}
+				if chatGemini && (!gjson.GetBytes(raw, "stream").Bool() || !gjson.GetBytes(raw, "stream_options.include_usage").Bool()) {
+					reject("Chat-to-Gemini request must request streaming usage")
+					return
+				}
 				mu.Lock()
 				calls[p]++
 				mu.Unlock()
 				w.Header().Set("Content-Type", "text/event-stream")
 				io.WriteString(w, scenarioStream(p, scenario, s.stream))
 				w.(http.Flusher).Flush()
-				if scenario == "responses-tools-cancel" {
+				if scenario == "responses-tools-cancel" || (chatGemini && chatGeminiSpec.cancel) {
 					mu.Lock()
 					stop := cancelRequest
 					mu.Unlock()
@@ -204,6 +209,9 @@ func runScenario(pluginPath string, matrix bool, scenario string) error {
 	router.POST("/v1beta/models/*action", gemini.NewGeminiAPIHandler(base).GeminiHandler)
 	var results []error
 	for _, upstream := range protocols {
+		if chatGemini && upstream != "chat" {
+			continue
+		}
 		if strings.HasPrefix(scenario, "responses-tools") && upstream != "responses" {
 			continue
 		}
@@ -211,6 +219,9 @@ func runScenario(pluginPath string, matrix bool, scenario string) error {
 			continue
 		}
 		for _, client := range protocols {
+			if chatGemini && client != "gemini" {
+				continue
+			}
 			if strings.HasPrefix(scenario, "responses-tools") && client != "gemini" {
 				continue
 			}
@@ -229,6 +240,36 @@ func runScenario(pluginPath string, matrix bool, scenario string) error {
 			router.ServeHTTP(recorder, req)
 			stopRequest()
 			label := upstream + " -> " + client
+			if chatGemini {
+				var err error
+				if chatGeminiSpec.cancel {
+					select {
+					case <-upstreamCancelled:
+					case <-time.After(3 * time.Second):
+						results = append(results, errors.New("cancelled Chat-to-Gemini client left upstream request open"))
+					}
+					err = validateCancelled(recorder.Body.String())
+					if err == nil && (recorder.Code != 200 || !strings.HasPrefix(recorder.Header().Get("Content-Type"), "text/event-stream")) {
+						err = errors.New("Chat-to-Gemini cancellation did not exercise HTTP SSE")
+					}
+					if err == nil && !strings.Contains(recorder.Body.String(), `"text":"OK"`) {
+						err = errors.New("Chat-to-Gemini cancellation did not deliver the initial text")
+					}
+					if err == nil && strings.Contains(recorder.Body.String(), `"usageMetadata"`) {
+						err = errors.New("Chat-to-Gemini cancellation invented usage")
+					}
+				} else if chatGeminiSpec.failure {
+					err = validateFailure(client, recorder.Code, recorder.Body.String())
+				} else {
+					err = validateChatGemini(chatGeminiSpec, recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+				}
+				if err != nil {
+					results = append(results, fmt.Errorf("%s %s: %w; body=%q", label, scenario, err, recorder.Body.String()))
+				} else {
+					fmt.Println("PASS:", label, scenario, "final HTTP terminal, usage and content semantics")
+				}
+				continue
+			}
 			if upstream == "anthropic" && client == "gemini" {
 				if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "Claude-to-Gemini response conversion is not supported safely") {
 					results = append(results, fmt.Errorf("%s: expected explicit unsupported conversion rejection, got %d %s", label, recorder.Code, recorder.Body.String()))
@@ -305,6 +346,9 @@ func runScenario(pluginPath string, matrix bool, scenario string) error {
 	defer mu.Unlock()
 	results = append(results, failures...)
 	for _, p := range protocols {
+		if chatGemini && p != "chat" {
+			continue
+		}
 		if strings.HasPrefix(scenario, "responses-tools") && p != "responses" {
 			continue
 		}
@@ -417,6 +461,9 @@ func validateSSE(protocol, body string) error {
 }
 
 func scenarioStream(protocol, scenario, stream string) string {
+	if c, ok := chatGeminiScenario(scenario); ok {
+		return c.stream
+	}
 	if strings.HasPrefix(scenario, "responses-tools") {
 		tools := "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_alpha\",\"call_id\":\"call_alpha\",\"name\":\"alpha\",\"arguments\":\"{\\\"value\\\":1}\"}}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"id\":\"fc_beta\",\"call_id\":\"call_beta\",\"name\":\"beta\",\"arguments\":\"{\\\"value\\\":2}\"}}\n\n"
 		stream = strings.ReplaceAll(stream, `"output_index":0`, `"output_index":2`)
